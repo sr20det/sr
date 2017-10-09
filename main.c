@@ -59,10 +59,9 @@ runall(char *arg0, int argl, DUnit *du, const int dL)
 {
 	int i;
 
-	argl = MIN(argl, sizeof(du[i].n));
 	for (i=0; i<dL; i++)
 	{
-		if (!du[i].i)
+		if ((!du[i].i) | du[i].p)
 			continue;
 		du[i].p = fork();
 		if (du[i].p)
@@ -84,25 +83,23 @@ runall(char *arg0, int argl, DUnit *du, const int dL)
 	return 0;
 }
 
-static int
+int
 main(int argc, char *argv[])
 {
 	DIR  *dp=NULL;
-	char *dn;
 	const int dL=256;
 	int i, argl;
 	pid_t p;
 	DUnit du[dL];
 	
 	argl = argv[argc-1] + strlen(argv[argc-1]) - argv[0];
-	dn   = strdup( argc>1 ? argv[1] : "/var/sr" );
-	argc = 1;
-	if (chdir(dn))
+	if (chdir( argc>1 ? argv[1] : "/var/sr" ))
 		goto sr_9;
+	argc = 1;
 
  sr_0:
 	memset(du, 0, sizeof(DUnit) * dL);
-	dp = opendir("./");
+	dp = opendir(".");
 	if (!dp)
 		return -1;
 
@@ -114,6 +111,9 @@ main(int argc, char *argv[])
 			break;
 		case 1:
 			closedir(dp);
+			for (i=0; i<dL; i++)
+				if (du[i].n)
+					free(du[i].n);
 			goto sr_0;
 		case -1:
 		default:
@@ -125,9 +125,9 @@ main(int argc, char *argv[])
 	{
 		for (i=0; du[i].p != p && i<dL; i++)
 			;
-		du[i].i = 0;
+		du[i].p = du[i].i = 0;
+		free(du[i].n);
 		sleep(3);
-		seekdir(dp, 1);
 		goto sr_1;
 	}
 
