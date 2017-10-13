@@ -16,8 +16,8 @@ typedef struct {
 		char *n;
 		long long *t;
 	};
-	void *cu;
-	int   cl;
+	void *cu; /* DUnit * */
+	int   cl; /* not used */
 	int   f;
 } DUnit;
 
@@ -31,8 +31,22 @@ enum {
 	UF_RUN = 4
 };
 
-static int
-dread(DUnit *, const int);
+static inline void
+dpeel(DUnit **dup, const int dL, int ei)
+{
+	int i;
+	DUnit *du = *dup;
+
+	*dup = ei==-1 ? NULL : du[ei].cu;
+	for (i=dL; i--;)
+	{
+		if (du[i].cu && i!=ei)
+			dpeel((DUnit**)&(du[i].cu), dL, -1);
+		if (du[i].n)
+			free(du[i].n);
+	}
+	free(du);
+}
 
 static int
 dread(DUnit *du, const int dL)
@@ -42,7 +56,7 @@ dread(DUnit *du, const int dL)
 	int i, z, n;
 	DUnit *dout;
 
-	dp = opendir(du->n);
+	dp = opendir(du->n ? du->n : ".");
 	if (!dp)
 		return -1;
 	if (!du->cu)
@@ -79,15 +93,17 @@ dread(DUnit *du, const int dL)
 }
 
 static int
-runall(char *arg0, int argl, DUnit *du, const int dL)
+runall(char *arg0, int argl, DUnit **dup, const int dL)
 {
 	int i;
+	DUnit *du = *dup;
 
-	for (i=0; i<dL; i++)
+	for (i=dL; i--;)
 	{
 		if ((!du[i].i) | du[i].p)
 			continue;
-		dread(&du[i], dL);
+		if (du[i].f == UF_DIR)
+			dread(&du[i], dL);
 		if (du[i].f == UF_IGN)
 			continue;
 		du[i].p = fork();
@@ -98,6 +114,7 @@ runall(char *arg0, int argl, DUnit *du, const int dL)
 			strncpy(arg0, du[i].n, argl);
 			if (chdir(du[i].n))
 				return -1;
+			dpeel(dup, dL, i);
 			return UF_DIR;
 		}
 		if (*du[i].t == UT_RUN)
@@ -112,42 +129,39 @@ runall(char *arg0, int argl, DUnit *du, const int dL)
 int
 main(int argc, char *argv[])
 {
-	DIR  *dp=NULL;
-	const int dL=256;
+	const int dL=8;
 	int i, argl;
 	pid_t p;
-	DUnit *du = {0}, *cu;
+	DUnit du = {0}, *cu;
 	
 	argl = argv[argc-1] + strlen(argv[argc-1]) - argv[0];
 	if (chdir( argc>1 ? argv[1] : "/var/sr" ))
 		goto sr_9;
 	argc = 1;
-	du->n = ".";
-	dread(du, dL);
+	dread(&du, dL);
+	cu = du.cu;
 
  sr_0:
 	//memset(du, 0, sizeof(DUnit) * dL);
 
  sr_1:
-	switch (runall(argv[0], argl, du, dL))
+	switch (runall(argv[0], argl, &cu, dL))
 	{
 		case 0:
 			break;
 		case 1:
-			for (i=0; i<dL; i++)
-				free(cu[i].n);
+
 			goto sr_0;
 		case -1:
 		default:
 			sleep(5);
 			goto sr_9;
 	}
-	cu = du->cu;
 	while ((p = wait(NULL)) != -1)
 	{
-		for (i=0; cu[i].p != p && i<dL; i++)
+		for (i=dL; i-- && (cu[i].p != p);)
 			;
-		cu[i].p = cu[i].i = 0;
+		cu[i].p = 0;
 		free(cu[i].n);
 		sleep(3);
 		goto sr_1;
