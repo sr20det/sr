@@ -12,45 +12,69 @@
 typedef struct {
 	ino_t i;
 	pid_t p;
-	int   f;
 	union {
 		char *n;
 		long long *t;
 	};
+	void *cu;
+	int   cl;
+	int   f;
 } DUnit;
 
 enum {
 	UT_RUN  = 0x6e7572LL,
 	UT_DOWN = 0x6e776f64LL
 };
+enum {
+	UF_DIR = 1,
+	UF_IGN = 2,
+	UF_RUN = 4
+};
 
 static int
-dread(DIR *dp, DUnit *du, const int dL)
+dread(DUnit *, const int);
+
+static int
+dread(DUnit *du, const int dL)
 {
+	DIR *dp;
 	struct dirent *de;
 	int i, z, n;
+	DUnit *dout;
 
-	seekdir(dp, 1);
+	dp = opendir(du->n);
+	if (!dp)
+		return -1;
+	if (!du->cu)
+		du->cu = calloc(dL, sizeof(DUnit));
+	dout = du->cu;
 	while ((de = readdir(dp)))
 	{
 		if (de->d_name[0] == '.')
 			continue;
 		for (z=i=0; i<dL; i++)
 		{
-			if (du[i].i == de->d_ino)
+			if (dout[i].i == de->d_ino)
 				break;
-			if (!(du[i].i|z))
+			if (!(dout[i].i|z))
 				z = i;
 		}
 		if (i == dL && z)
 		{
-			du[z].i = de->d_ino;
-			du[z].f = !(de->d_type ^ DT_DIR);
+			dout[z].i = de->d_ino;
 			n = MAX(strlen(de->d_name)+1, sizeof(long long));
-			du[z].n = calloc(n, 1);
-			strcpy(du[z].n, de->d_name);
+			dout[z].n = calloc(n, 1);
+			strcpy(dout[z].n, de->d_name);
+			dout[z].f = !(de->d_type ^ DT_DIR);
+			switch (*dout[z].t)
+			{
+				case UT_DOWN:
+					du->f |= UF_IGN;
+					break;
+			}
 		}
 	}
+	closedir(dp);
 	return 0;
 }
 
@@ -63,21 +87,23 @@ runall(char *arg0, int argl, DUnit *du, const int dL)
 	{
 		if ((!du[i].i) | du[i].p)
 			continue;
+		dread(&du[i], dL);
+		if (du[i].f == UF_IGN)
+			continue;
 		du[i].p = fork();
 		if (du[i].p)
 			continue;
-		if (du[i].f == 1)
+		if (du[i].f == UF_DIR)
 		{
 			strncpy(arg0, du[i].n, argl);
 			if (chdir(du[i].n))
 				return -1;
-			return 1;
+			return UF_DIR;
 		}
-		switch (*du[i].t)
+		if (*du[i].t == UT_RUN)
 		{
-			case UT_RUN:
-				execl("run", arg0, NULL);
-				return -1;
+			execl("run", arg0, NULL);
+			return -1;
 		}
 	}
 	return 0;
@@ -90,48 +116,43 @@ main(int argc, char *argv[])
 	const int dL=256;
 	int i, argl;
 	pid_t p;
-	DUnit du[dL];
+	DUnit *du = {0}, *cu;
 	
 	argl = argv[argc-1] + strlen(argv[argc-1]) - argv[0];
 	if (chdir( argc>1 ? argv[1] : "/var/sr" ))
 		goto sr_9;
 	argc = 1;
+	du->n = ".";
+	dread(du, dL);
 
  sr_0:
-	memset(du, 0, sizeof(DUnit) * dL);
-	dp = opendir(".");
-	if (!dp)
-		return -1;
+	//memset(du, 0, sizeof(DUnit) * dL);
 
  sr_1:
-	dread(dp, du, dL);
 	switch (runall(argv[0], argl, du, dL))
 	{
 		case 0:
 			break;
 		case 1:
-			closedir(dp);
 			for (i=0; i<dL; i++)
-				if (du[i].n)
-					free(du[i].n);
+				free(cu[i].n);
 			goto sr_0;
 		case -1:
 		default:
 			sleep(5);
 			goto sr_9;
 	}
-
+	cu = du->cu;
 	while ((p = wait(NULL)) != -1)
 	{
-		for (i=0; du[i].p != p && i<dL; i++)
+		for (i=0; cu[i].p != p && i<dL; i++)
 			;
-		du[i].p = du[i].i = 0;
-		free(du[i].n);
+		cu[i].p = cu[i].i = 0;
+		free(cu[i].n);
 		sleep(3);
 		goto sr_1;
 	}
 
  sr_9:
-	closedir(dp);
 	return 0;
 }
